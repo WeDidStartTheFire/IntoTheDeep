@@ -18,16 +18,16 @@ import androidx.annotation.Nullable;
 
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 
-import com.acmerobotics.roadrunner.geometry.Pose2d;
-import com.acmerobotics.roadrunner.trajectory.Trajectory;
+import com.acmerobotics.roadrunner.Pose2d;
+import com.acmerobotics.roadrunner.Trajectory;
 import com.qualcomm.hardware.rev.*;
 import com.qualcomm.robotcore.eventloop.opmode.*;
 import com.qualcomm.robotcore.hardware.*;
 import com.qualcomm.robotcore.util.*;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
-import org.firstinspires.ftc.teamcode.drive.RedundantLocalizer;
-import org.firstinspires.ftc.teamcode.drive.SampleMecanumDrive;
+import org.firstinspires.ftc.teamcode.localizers.RedundantLocalizer;
+import org.firstinspires.ftc.teamcode.other.MecanumDrive;
 import org.firstinspires.ftc.vision.*;
 import org.firstinspires.ftc.vision.apriltag.*;
 
@@ -87,8 +87,8 @@ public abstract class Base extends LinearOpMode {
     double velocity = DEFAULT_VELOCITY;
     public VisionPortal visionPortal;
     private AprilTagProcessor tagProcessor;
-    public SampleMecanumDrive drive;
-    public Pose2d currentPose = new Pose2d();
+    public MecanumDrive drive;
+    public Pose2d currentPose = new Pose2d(0, 0, 0);
 
     public volatile boolean loop = false;
     public volatile boolean running = true;
@@ -108,7 +108,6 @@ public abstract class Base extends LinearOpMode {
     public static final IMU.Parameters IMU_PARAMS = new IMU.Parameters(
             new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.LEFT,
                     RevHubOrientationOnRobot.UsbFacingDirection.FORWARD));
-
 
 
     static final double WRIST_MOTOR_POWER = 0.1;
@@ -229,8 +228,7 @@ public abstract class Base extends LinearOpMode {
             }
         }
         try {
-            drive = new SampleMecanumDrive(hardwareMap);
-            drive.setPoseEstimate(currentPose);
+            drive = new MecanumDrive(hardwareMap, currentPose);
             drive.breakFollowing();
         } catch (IllegalArgumentException e) {
             except("SparkFun Sensor not connected");
@@ -505,7 +503,7 @@ public abstract class Base extends LinearOpMode {
         if (useOdometry) {
             int dir = direction == LEFT ? -1 : 1;
             drive.turn(Math.toRadians(degrees * dir));
-            currentPose = new Pose2d(currentPose.getX(), currentPose.getY(), currentPose.getHeading() + Math.toRadians(degrees * dir));
+            currentPose = new Pose2d(currentPose.position.x, currentPose.position.y, currentPose.heading.real + Math.toRadians(degrees * dir));
         } else IMUTurn(degrees, direction);
     }
 
@@ -521,10 +519,10 @@ public abstract class Base extends LinearOpMode {
 
     public void lineTo(Pose2d position, boolean reverse, boolean double_reverse) {
         if (!useOdometry) return;
-        Pose2d delta_pos = position.minus(currentPose);  // position - currentPose?
-        turn(simplifyAngle(toDegrees(toRadians(reverse ^ double_reverse ? 180 : 0) + atan2(delta_pos.getY(), delta_pos.getX()) + currentPose.getHeading())));
-        drive(hypot(delta_pos.getX(), delta_pos.getY()), reverse ? BACKWARD : FORWARD);
-        turn(simplifyAngle(toDegrees(position.getHeading() - currentPose.getHeading())));
+        Pose2d delta_pos = position.minusExp(currentPose);  // position - currentPose?
+        turn(simplifyAngle(toDegrees(toRadians(reverse ^ double_reverse ? 180 : 0) + atan2(delta_pos.position.y, delta_pos.position.x) + currentPose.heading.real)));
+        drive(hypot(delta_pos.position.x, delta_pos.position.y), reverse ? BACKWARD : FORWARD);
+        turn(simplifyAngle(toDegrees(position.heading.real - currentPose.heading.real)));
     }
 
     public void lineTo(Pose2d position, boolean reverse) {
@@ -704,7 +702,7 @@ public abstract class Base extends LinearOpMode {
      * @param inches    Amount of inches to drive.
      * @param direction Direction to drive in.*
      */
-    public void drive(Dir direction, double inches){
+    public void drive(Dir direction, double inches) {
         drive(inches, direction);
     }
 
@@ -1165,7 +1163,7 @@ public abstract class Base extends LinearOpMode {
         double speedMultiplier = gamepad1.left_bumper ? speeds[0] : gamepad1.right_bumper ? speeds[2] : speeds[1];
 
         if (fieldCentric) {
-            double angle = PI / 2 + (useOdometry ? -drive.getRawExternalHeading() : -imu.getRobotOrientation(INTRINSIC, ZYX, RADIANS).firstAngle);
+            double angle = PI / 2 + (useOdometry ? -drive.localizer.getPose().heading.real : -imu.getRobotOrientation(INTRINSIC, ZYX, RADIANS).firstAngle);
 
             double joystickAngle = Math.atan2(gamepad1.left_stick_y, gamepad1.left_stick_x);
             double moveAngle = joystickAngle - angle;
@@ -1216,9 +1214,9 @@ public abstract class Base extends LinearOpMode {
     /** Logic for automatically moving during TeleOp */
     public void autoMovementLogic(boolean validPose) {
         if (!validPose) return;
-        if (useOdometry) drive.update();
+        if (useOdometry) drive.localizer.update();
         else if (!gamepad1.a) return;
-        Pose2d poseEstimate = drive.getPoseEstimate();
+        Pose2d poseEstimate = drive.localizer.getPose();
         if (gamepad1.a) {
             following = true;
             Trajectory trajectory = drive.trajectoryBuilder(poseEstimate)
@@ -1314,7 +1312,7 @@ public abstract class Base extends LinearOpMode {
             }
         }
         wasIntakeServoButtonPressed = gamepad2.b;
-        if ((runtime.milliseconds() >= wristServoTimer) && (wristServoTimer != 0)){
+        if ((runtime.milliseconds() >= wristServoTimer) && (wristServoTimer != 0)) {
             wristMotorStopPos = 60;
             wristMotorTicksStopped = 5;
             hoverWristServoY();
@@ -1562,21 +1560,7 @@ public abstract class Base extends LinearOpMode {
         loop = true;
         while (active() && loop) {
             updateAll();
-            if (auto) saveOdometryPosition(drive.getPoseEstimate());
-        }
-    }
-
-    /**
-     * Saves the current pose to a file.
-     *
-     * @param pos Pose to save
-     */
-    public void saveOdometryPosition(@NonNull Pose2d pos) {
-        File file = new File(Environment.getExternalStorageDirectory(), "odometryPosition.txt");
-        try (FileWriter writer = new FileWriter(file, false)) {
-            writer.write(pos.getX() + "," + pos.getY() + "," + pos.getHeading()); // Write the latest position
-        } catch (IOException e) {
-            print("Error", "Failed to save odometry position: " + e.getMessage());
+            if (auto) saveOdometryPosition(drive.localizer.getPose());
         }
     }
 
@@ -1607,6 +1591,20 @@ public abstract class Base extends LinearOpMode {
             }
         }
         return null;
+    }
+
+    /**
+     * Saves the current pose to a file.
+     *
+     * @param pos Pose to save
+     */
+    public void saveOdometryPosition(@NonNull Pose2d pos) {
+        File file = new File(Environment.getExternalStorageDirectory(), "odometryPosition.txt");
+        try (FileWriter writer = new FileWriter(file, false)) {
+            writer.write(pos.position.x + "," + pos.position.y + "," + pos.heading.real); // Write the latest position
+        } catch (IOException e) {
+            print("Error", "Failed to save odometry position: " + e.getMessage());
+        }
     }
 
     /** Adds information messages to telemetry and updates it */
@@ -1642,13 +1640,13 @@ public abstract class Base extends LinearOpMode {
         else print("Touch Sensor Pressed", verticalTouchSensor.isPressed());
         if (wristServoX == null) print("Intake Servo", "Disconnected");
         if (useOdometry) {
-            Pose2d pos = drive.getPoseEstimate();
-            print(String.format(US, "SparkFun Position :  X: %.2f, Y: %.2f, θ: %.2f°", pos.getX(), pos.getY(), toDegrees(pos.getHeading())));
+            Pose2d pos = drive.localizer.getPose();
+            print(String.format(US, "SparkFun Position :  X: %.2f, Y: %.2f, θ: %.2f°", pos.position.x, pos.position.y, toDegrees(pos.heading.real)));
         } else print("Odometry disabled");
 
 
-        if (drive != null && drive.getLocalizer() instanceof RedundantLocalizer) {
-            RedundantLocalizer localizer = (RedundantLocalizer) drive.getLocalizer();
+        if (drive != null && drive.localizer instanceof RedundantLocalizer) {
+            RedundantLocalizer localizer = (RedundantLocalizer) drive.localizer;
             boolean usingPrimary = localizer.isUsingPrimaryLocalizer();
             print("Using Primary Localizer", usingPrimary);
         } else print("Localizer is not a RedundantLocalizer");
