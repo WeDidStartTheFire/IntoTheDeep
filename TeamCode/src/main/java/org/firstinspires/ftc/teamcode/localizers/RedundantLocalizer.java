@@ -6,10 +6,6 @@ import com.acmerobotics.roadrunner.Pose2d;
 import com.acmerobotics.roadrunner.PoseVelocity2d;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-import org.firstinspires.ftc.teamcode.drive.SparkFunLocalizer;
-import org.firstinspires.ftc.teamcode.drive.StandardTrackingWheelLocalizer;
-
-import java.util.ArrayList;
 
 public class RedundantLocalizer implements Localizer {
 
