@@ -20,6 +20,9 @@ public class OTOSLocalizer implements Localizer {
 
         // Note: units are in inches and radians
         public SparkFunOTOS.Pose2D offset = new SparkFunOTOS.Pose2D(0, 6.5, 0);
+
+        public final DistanceUnit linearUnit = DistanceUnit.INCH;
+        public final AngleUnit angleUnit = AngleUnit.RADIANS;
     }
 
     public static Params PARAMS = new Params();
@@ -31,8 +34,8 @@ public class OTOSLocalizer implements Localizer {
         otos = hardwareMap.get(SparkFunOTOS.class, "sensorOtos");
         currentPose = initialPose;
         otos.setPosition(OTOSKt.toOTOSPose(currentPose));
-        otos.setLinearUnit(DistanceUnit.INCH);
-        otos.setAngularUnit(AngleUnit.RADIANS);
+        otos.setLinearUnit(PARAMS.linearUnit);
+        otos.setAngularUnit(PARAMS.angleUnit);
 
         otos.calibrateImu();
         otos.setLinearScalar(PARAMS.linearScalar);
